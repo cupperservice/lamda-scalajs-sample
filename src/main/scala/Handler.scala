@@ -12,6 +12,8 @@ import js.JSConverters._
 case class FaceData(gender: String, ageLow: Int, ageHigh: Int)
 
 object Handler {
+  val tblName = "cupper-tbl" // Change your table name
+
   def main(event: S3Event)(implicit ec: ExecutionContext): Future[Unit] = {
     implicit def toFaceData(res: DetectFacesResponse): List[FaceData] =
       res.FaceDetails.get.foldLeft(List[FaceData]()) {(list, detail) =>
@@ -21,27 +23,25 @@ object Handler {
           detail.AgeRange.get.High.toString.toInt) :: list
       }
 
-    event.Records.map(r => {
-      val bucketName = r.s3.bucket.name
-      val key = r.s3.`object`.key
-      for {
-        res <- detectImage(bucketName, key)
-        putItem <- putData(bucketName, key, res)
-      } yield {
-          val data = for (detail <- res.FaceDetails.get) yield {
-          val gender = detail.Gender.get.Value
-          val ageRange = detail.AgeRange.get
-          (ageRange.High, ageRange.Low)
+    val r = event.Records.pop()
+    val bucketName = r.s3.bucket.name
+    val key = r.s3.`object`.key
+    for {
+      res <- detectImage(bucketName, key)
+      putItem <- putData(bucketName, key, res)
+    } yield {
+      for (detail <- res.FaceDetails.get) {
+        val gender = detail.Gender.get.Value
+        val ageRange = detail.AgeRange.get
 
-          println("==============")
-          println(gender.toString)
-          println(ageRange.High)
-          println(ageRange.Low)
-          println("==============")
-        }
+        println("==============")
+        println(gender.toString)
+        println(ageRange.High)
+        println(ageRange.Low)
+        println("==============")
       }
-    })
-  }.pop()
+    }
+  }
 
   def putData(bucketName: String, key: String, faceDataList: List[FaceData])(implicit ec: ExecutionContext): Future[BatchWriteItemOutput] = {
     val items = faceDataList.foldLeft(List[WriteRequest]())((list, faceData) => {
@@ -50,7 +50,7 @@ object Handler {
           Item = Dictionary(
             "name" -> AttributeValue.S(s"${bucketName}:${key}"),
             "ageLow" -> AttributeValue.NFromInt(faceData.ageLow),
-            "ageGigh" -> AttributeValue.NFromInt(faceData.ageHigh),
+            "ageHigh" -> AttributeValue.NFromInt(faceData.ageHigh),
             "gender" -> AttributeValue.S(faceData.gender)
           )
         )
@@ -58,7 +58,7 @@ object Handler {
     })
 
     new DynamoDB().batchWriteItemFuture(BatchWriteItemInput(
-      RequestItems = Dictionary("cupper-tbl" -> items.toJSArray)
+      RequestItems = Dictionary(tblName -> items.toJSArray)
     ))
   }
 
